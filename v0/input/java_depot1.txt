@@ -1,0 +1,199 @@
+const SHEET_ID = "1YLuxOaVtz8_gzI_sYbYrj7nvS-Ntze11_Bua8pTu-Kg";
+
+function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  
+  if (data.action === "append_snapshot") {
+    return appendSnapshot(data.payload);
+  }
+  if (data.action === "append_cashflows") {
+  return appendCashflows(data.payload);
+  }
+  if (data.action === "get_snapshot_bundle") {
+  return getSnapshotBundle(data.payload);
+  }
+
+  if (data.action === "get_history") {
+    return getHistory();
+  }
+
+  return ContentService
+    .createTextOutput(JSON.stringify({error: "Unknown action"}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function appendSnapshot(payload) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  
+  const snapshotSheet = ss.getSheetByName("snapshots");
+  const positionSheet = ss.getSheetByName("positions");
+  
+  const s = payload.snapshot;
+  
+  snapshotSheet.appendRow([
+    s.snapshot_id,
+    s.timestamp_berlin,
+    s.broker,
+    s.depot_id || "",
+    s.portfolio_value_eur || "",
+    s.notes || ""
+  ]);
+  
+  payload.positions.forEach(p => {
+    positionSheet.appendRow([
+      s.snapshot_id,
+      p.instrument_key,
+      p.isin || "",
+      p.wkn || "",
+      p.name_raw,
+      p.asset_class || "",
+      p.region || "",
+      p.sector || "",
+      p.quantity || "",
+      p.price || "",
+      p.market_value_eur,
+      p.unreal_pl_eur || "",
+      p.unreal_pl_pct || ""
+    ]);
+  });
+  
+  return ContentService
+    .createTextOutput(JSON.stringify({status: "ok"}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+function appendCashflows(payload) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const cashflowSheet = ss.getSheetByName("cashflows");
+
+  if (!payload) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: "Missing payload" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const rows =
+    payload.cashflows ||
+    payload.rows ||
+    payload.entries ||
+    payload.items ||
+    [];
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return ContentService
+      .createTextOutput(JSON.stringify({
+        error: "Missing or invalid cashflow array",
+        received_payload: payload
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const values = rows.map(c => [
+    c.date || c.booking_date || "",
+    c.broker || payload.broker || "",
+    c.amount_eur || c.amount || "",
+    c.type || c.category || "unknown",
+    c.instrument_key || c.isin || c.wkn || c.name || "",
+    c.memo_raw || c.memo || c.description || ""
+  ]);
+
+  const startRow = cashflowSheet.getLastRow() + 1;
+  const startCol = 1;
+
+  cashflowSheet
+    .getRange(startRow, startCol, values.length, values[0].length)
+    .setValues(values);
+
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      status: "ok",
+      rows_written: values.length
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getSnapshotBundle(payload) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const snapshotsSheet = ss.getSheetByName("snapshots");
+  const positionsSheet = ss.getSheetByName("positions");
+
+  if (!payload) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: "Missing payload" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const snapshotId = payload.snapshot_id || "";
+  const broker = payload.broker || "";
+  const depotId = payload.depot_id || "";
+
+  const snapshots = snapshotsSheet.getDataRange().getValues();
+  const positions = positionsSheet.getDataRange().getValues();
+
+  if (snapshots.length < 2) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: "No snapshot data available" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const snapshotHeaders = snapshots[0];
+  const snapshotRows = snapshots.slice(1);
+
+  const positionsHeaders = positions.length > 0 ? positions[0] : [];
+  const positionRows = positions.length > 1 ? positions.slice(1) : [];
+
+  function rowToObject(headers, row) {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = row[i]);
+    return obj;
+  }
+
+  let selectedSnapshot = null;
+
+  if (snapshotId) {
+    selectedSnapshot = snapshotRows
+      .map(r => rowToObject(snapshotHeaders, r))
+      .find(r => String(r.snapshot_id) === String(snapshotId)) || null;
+  } else {
+    let filtered = snapshotRows.map(r => rowToObject(snapshotHeaders, r));
+
+    if (broker) {
+      filtered = filtered.filter(r => String(r.broker).toLowerCase() === String(broker).toLowerCase());
+    }
+
+    if (depotId) {
+      filtered = filtered.filter(r => String(r.depot_id) === String(depotId));
+    }
+
+    filtered.sort((a, b) => String(a.timestamp_berlin).localeCompare(String(b.timestamp_berlin)));
+    selectedSnapshot = filtered.length ? filtered[filtered.length - 1] : null;
+  }
+
+  if (!selectedSnapshot) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: "Snapshot not found" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const selectedPositions = positionRows
+    .map(r => rowToObject(positionsHeaders, r))
+    .filter(r => String(r.snapshot_id) === String(selectedSnapshot.snapshot_id));
+
+  return ContentService
+    .createTextOutput(JSON.stringify({
+      status: "ok",
+      snapshot: selectedSnapshot,
+      positions: selectedPositions
+    }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getHistory() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName("snapshots");
+  
+  const data = sheet.getDataRange().getValues();
+  
+  return ContentService
+    .createTextOutput(JSON.stringify({data}))
+    .setMimeType(ContentService.MimeType.JSON);
+}

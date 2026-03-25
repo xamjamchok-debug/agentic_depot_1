@@ -1,0 +1,103 @@
+openapi: 3.1.0
+info:
+  title: DepotLab API
+  version: 1.0.0
+
+servers:
+  - url: https://script.google.com/macros/s/AKfycbzaL_6GssPKwo12KTE2T76u092LVEoR1SkgW2rKiMUq8WzWrksJe5mFuNaZxGwHIU6ISw/exec
+
+paths:
+  /:
+    post:
+      operationId: depotAction
+      summary: Store or retrieve snapshots and cashflows
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+                - payload
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - append_snapshot
+                    - append_cashflows
+                    - get_snapshot_bundle
+                    - get_history
+                payload:
+                  type: object
+                  properties:
+                    snapshot:
+                      type: object
+                      properties:
+                        snapshot_id:
+                          type: string
+                        timestamp_berlin:
+                          type: string
+                        broker:
+                          type: string
+                        depot_id:
+                          type: string
+                        portfolio_value_eur:
+                          type: number
+                        notes:
+                          type: string
+                    positions:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          instrument_key:
+                            type: string
+                          isin:
+                            type: string
+                          wkn:
+                            type: string
+                          name_raw:
+                            type: string
+                          asset_class:
+                            type: string
+                          region:
+                            type: string
+                          sector:
+                            type: string
+                          quantity:
+                            type: number
+                          price:
+                            type: number
+                          market_value_eur:
+                            type: number
+                          unreal_pl_eur:
+                            type: number
+                          unreal_pl_pct:
+                            type: number
+                    cashflows:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          date:
+                            type: string
+                          broker:
+                            type: string
+                          amount_eur:
+                            type: number
+                          type:
+                            type: string
+                          instrument_key:
+                            type: string
+                          memo_raw:
+                            type: string
+                    snapshot_id:
+                      type: string
+                    broker:
+                      type: string
+                    depot_id:
+                      type: string
+      responses:
+        "200":
+          description: OK
